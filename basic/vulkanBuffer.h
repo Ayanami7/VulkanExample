@@ -9,6 +9,7 @@
 
 #pragma once
 #ifndef _VULKAN_BUFFER_H_
+#define _VULKAN_BUFFER_H_
 
 #include <vector>
 #include <vulkan/vulkan.h>

@@ -9,6 +9,7 @@
 
 #pragma once
 #ifndef _VULKAN_TOOLS_H_
+#define _VULKAN_TOOLS_H_
 
 #include <vulkan/vulkan.h>
 #include "vulkanInitializers.hpp"

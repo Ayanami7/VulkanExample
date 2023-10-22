@@ -8,3 +8,5 @@ STATIC
 
 target_include_directories(basic PUBLIC ${CMAKE_SOURCE_DIR}/ext/glm)
 target_include_directories(basic PUBLIC ${CMAKE_SOURCE_DIR}/ext)
+
+target_link_directories(basic PUBLIC ${Vulkan_LIABRARY})
