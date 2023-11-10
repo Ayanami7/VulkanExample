@@ -20,6 +20,7 @@ namespace vks
 {
     struct VulkanDevice
     {
+        
         /// @brief Physical device representation
         VkPhysicalDevice physicalDevice;
         /// @brief Logical device representation
