@@ -379,4 +379,143 @@ namespace vks
 		// Attach the memory to the buffer object
 		return buffer->bind();
     }
+
+    /// @brief Copy buffer data from src to dst using VkCmdCopyBuffer
+    /// @param src Pointer to the source buffer to copy from
+    /// @param dst Pointer to the destination buffer to copy to
+    /// @param queue Pointer
+    /// @param copyRegion (Optional) Pointer to a copy region, if NULL, the whole buffer is copied
+    void VulkanDevice::copyBuffer(vks::Buffer *src,vks::Buffer *dst,VkQueue queue,VkBufferCopy *copyRegion)
+    {
+        assert(dst->size <= src->size);
+        assert(src->buffer);
+
+        VkCommandBuffer copyCmd = createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        VkBufferCopy bufferCopy{};
+        if(copyRegion == nullptr)
+        {
+            bufferCopy.size = src->size;
+        }
+        else
+        {
+            bufferCopy = *copyRegion;
+        }
+
+        vkCmdCopyBuffer(copyCmd, src->buffer, dst->buffer, 1, &bufferCopy);
+        flushCommandBuffer(copyCmd, queue);
+    }
+
+    /// @brief Create a command pool for allocation command buffers from
+    /// @param queueFamilyIndex Family index of the queue to create the command pool for
+    /// @param createFlags (Optional) Command pool creation flags (Defaults to VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
+    /// @return A handle to the created command buffer
+    /// @note Command buffers allocated from the created pool can only be submitted to a queue with the same family index
+    VkCommandPool VulkanDevice::createCommandPool(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags createFlags)
+    {
+        VkCommandPoolCreateInfo cmdPoolInfo = {};
+        cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
+        cmdPoolInfo.flags = createFlags;
+        VkCommandPool cmdPool;
+        VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
+        return cmdPool;
+    }
+
+    /// @brief Allocate a command buffer from the command pool
+    /// @param level Level of the new command buffer (primary or secondary)
+    /// @param pool Command pool from which the command buffer will be allocated
+    /// @param begin (Optional) begin If true, recording on the new command buffer will be started (vkBeginCommandBuffer) (Defaults to false)
+    /// @return A handle to the allocated command buffer
+    VkCommandBuffer VulkanDevice::createCommandBuffer(VkCommandBufferLevel level, VkCommandPool pool, bool begin)
+    {
+        VkCommandBufferAllocateInfo cmdBufferAllocateInfo = vks::initializers::commandBufferAllocateInfo(pool, level, 1);
+        VkCommandBuffer cmdBuffer;
+        VK_CHECK_RESULT(vkAllocateCommandBuffers(logicalDevice, &cmdBufferAllocateInfo, &cmdBuffer));
+        // If requested, also start recording for the new command buffer
+        if(begin)
+        {
+            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+            VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
+        }
+        return cmdBuffer;
+    }
+
+    VkCommandBuffer VulkanDevice::createCommandBuffer(VkCommandBufferLevel level, bool begin)
+	{
+		return createCommandBuffer(level, commandPool, begin);
+	}
+
+    /// @brief Finish command buffer recording and submit it to a queue
+    /// @param commandBuffer Command buffer to flush
+    /// @param queue Queue to submit the command buffer to
+    /// @param pool Command pool on which the command buffer has been created
+    /// @param free (Optional) Free the command buffer once it has been submitted (Defaults to true)
+
+    /// @note The queue that the command buffer is submitted to must be from the same family index as the pool it was allocated from
+	/// @note Uses a fence to ensure command buffer has finished executing
+    void VulkanDevice::flushCommandBuffer(VkCommandBuffer commandBuffer, VkQueue queue, VkCommandPool pool, bool free)
+	{
+		if (commandBuffer == VK_NULL_HANDLE)
+		{
+			return;
+		}
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
+
+		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+		// Create fence to ensure that the command buffer has finished executing
+		VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo(VK_FLAGS_NONE);
+		VkFence fence;
+		VK_CHECK_RESULT(vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence));
+		// Submit to the queue
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, fence));
+		// Wait for the fence to signal that command buffer has finished executing
+		VK_CHECK_RESULT(vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, DEFAULT_FENCE_TIMEOUT));
+		vkDestroyFence(logicalDevice, fence, nullptr);
+		if (free)
+		{
+			vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+		}
+	}
+    
+    void VulkanDevice::flushCommandBuffer(VkCommandBuffer commandBuffer, VkQueue queue, bool free)
+	{
+		return flushCommandBuffer(commandBuffer, queue, commandPool, free);
+	}
+
+    /// @brief Check if an extension is supported by the (physical device)
+    /// @param extension Name of the extension to check
+    /// @return True if the extension is supported (present in the list read at device creation time)
+    bool VulkanDevice::extensionSupported(std::string extension)
+	{
+		return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
+	}
+
+    /// @brief Select the best-fit depth format for this device from a list of possible depth (and stencil) formats
+    /// @param checkSamplingSupport Check if the format can be sampled from (e.g. for shader reads)
+    /// @return The depth format that best fits for the current device
+    /// @throw Throws an exception if no depth format fits the requirements
+    VkFormat VulkanDevice::getSupportedDepthFormat(bool checkSamplingSupport)
+	{
+		// All depth formats may be optional, so we need to find a suitable depth format to use
+		std::vector<VkFormat> depthFormats = { VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT, VK_FORMAT_D16_UNORM };
+		for (auto& format : depthFormats)
+		{
+			VkFormatProperties formatProperties;
+			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);
+			// Format must support depth stencil attachment for optimal tiling
+			if (formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+			{
+				if (checkSamplingSupport) {
+					if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
+						continue;
+					}
+				}
+				return format;
+			}
+		}
+		throw std::runtime_error("Could not find a matching depth format");
+	}
 };
