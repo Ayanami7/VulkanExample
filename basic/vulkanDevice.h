@@ -8,8 +8,8 @@
  */
 
 #pragma once
-#ifndef _VULKAN_DEVICE_H
-#define _VULKAN_DEVICE_H
+#ifndef _VULKAN_DEVICE_H_
+#define _VULKAN_DEVICE_H_
 
 #include "vulkanBuffer.h"
 #include "vulkanTools.h"
